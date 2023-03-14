@@ -1,0 +1,167 @@
+#!/bin/bash
+
+MYSQL="$(which mysql)"
+MYSQLDUMP="$(which mysqldump)"
+GZIP="$(which gzip)"
+USER="admin"	# DB_USERNAME
+PASS="Neutr1n0s" # DB_PASSWORD
+HOST="prod.cierubk1wshr.ap-south-1.rds.amazonaws.com" # DB_HOSTNAME
+SLACK_URL_TEST=https://hooks.slack.com/services/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
+SLACK_URL_PROD=https://hooks.slack.com/services/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
+
+# Backup Dest directory #
+DEST="/opt/prod-mysql" #
+
+# Set date in dd-mm-yyyy format
+NOW="$(date +"%d-%m-%Y-%R")"
+mkdir -p $DEST/$NOW && cd $DEST/$NOW
+
+curl -X POST -H 'Content-type: application/json' --data {\"text\":\"Starting CRM DATA Refresh for" \"$NOW\"}" $SLACK_URL_PROD
+
+## Backup MYSQL DATA ##
+curl -X POST -H 'Content-type: application/json' --data '{"text":"Backing up MySQL DATA... "}' $SLACK_URL_PROD
+backup_prod() {
+$MYSQLDUMP -h $HOST -u $USER -p$PASS oms orders > orders.sql
+$MYSQLDUMP -h $HOST -u $USER -p$PASS oms orders_demo > orders_demo.sql
+$MYSQLDUMP -h $HOST -u $USER -p$PASS oms pay_in_pay_out > pay_in_pay_out.sql
+$MYSQLDUMP -h $HOST -u $USER -p$PASS oms order_charges_detail > order_charges_detail.sql
+$MYSQLDUMP -h $HOST -u $USER -p$PASS fnouser customer > customer.sql
+$MYSQLDUMP -h $HOST -u $USER -p$PASS fnouser customerprofile > customerprofile.sql
+$MYSQLDUMP -h $HOST -u $USER -p$PASS fnouser user_kyc_details > user_kyc_details.sql
+$MYSQLDUMP -h $HOST -u $USER -p$PASS fnouser kyc_user_log_in_bk_new > kyc_user_log_in_bk_new.sql
+$MYSQLDUMP -h $HOST -u $USER -p$PASS fnouser user_ucc > user_ucc.sql
+$MYSQLDUMP -h $HOST -u $USER -p$PASS fnouser second_factor_auth > second_factor_auth.sql
+}
+
+backup_prod
+if [ $? -eq 0 ]
+then
+        curl -X POST -H 'Content-type: application/json' --data '{"text":"MySQL Prod Data Backup for CRM was successfull !!!"}' $SLACK_URL_PROD
+else
+        curl -X POST -H 'Content-type: application/json' --data '{"text":"MySQL Prod Data Backup for CRM failed !!!"}' $SLACK_URL_PROD && exit 0
+fi
+## DW Details ##
+USER2="admin"	# DB_USERNAME
+PASS2="T@chy0ns1"	# DB_PASSWORD
+HOST2="172.31.20.20"	# DB_HOSTNAME
+#SLACK_URL=https://hooks.slack.com/services/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
+
+### Tables count before import ###
+PRE_COUNT () {
+mysql  -h $HOST2 -u $USER2 -p$PASS2 fnocrm -N -e "SELECT table_name FROM INFORMATION_SCHEMA.tables where table_schema='fnocrm';" | while read -r table_name
+do
+	count=$(mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm -N -e "SELECT COUNT(*) FROM $table_name;")
+	PRE_COUNT=$(echo "DW CRM Tables count before import:" $table_name $count)
+
+	#echo  "Table count before import: $table_name $count;"
+	echo "$PRE_COUNT"
+	curl -X POST --silent --data \ "payload={\"text\": \"$PRE_COUNT\"}" $SLACK_URL_PROD;
+done
+}
+PRE_COUNT
+## Truncate older tables from fnocrm DB ##
+
+fnocrm_truncate() {
+mysql -h $HOST2 -u $USER2 -p$PASS2<<TRUNCATE_QUERY
+use fnocrm;
+SET SQL_SAFE_UPDATES = 0;
+update fnouser_customer set password = NULL, password = NOT NULL;
+TRUNCATE TABLE oms_orders;
+TRUNCATE TABLE oms_orders_demo;
+TRUNCATE TABLE oms_pay_in_pay_out;
+TRUNCATE TABLE oms_order_charges_detail;
+TRUNCATE TABLE fnouser_customer;
+TRUNCATE TABLE fnouser_customerprofile;
+TRUNCATE TABLE fnouser_user_ucc;
+TRUNCATE TABLE fnouser_user_kyc_details; 
+TRUNCATE TABLE fnouser_kyc_user_log_in_bk_new;
+TRUNCATE TABLE fnouser_second_factor_auth;
+TRUNCATE TABLE origin_non_kyc_users;
+TRUNCATE_QUERY
+
+}
+fnocrm_truncate
+
+if [ $? -eq 0 ]
+then
+        curl -X POST -H 'Content-type: application/json' --data '{"text":"fnorcm truncate all tables was successfull !!!"}' $SLACK_URL_PROD
+else
+        curl -X POST -H 'Content-type: application/json' --data '{"text":"fnocrm truncate all tables was failed !!!"}' $SLACK_URL_PROD
+fi
+
+curl -X POST -H 'Content-type: application/json' --data '{"text":"Starting MySQL DATA import for CRM Refresh... "}' $SLACK_URL_PROD
+
+## Rename in .SQL files ##
+
+sed -i 's/orders/oms_orders/g' orders.sql
+sed -i 's/orders_demo/oms_orders_demo/g' orders_demo.sql
+sed -i 's/order_charges_detail/oms_order_charges_detail/g' order_charges_detail.sql
+sed -i 's/pay_in_pay_out/oms_pay_in_pay_out/g' pay_in_pay_out.sql
+sed -i 's/customer/fnouser_customer/g' customer.sql
+sed -i 's/customerprofile/fnouser_customerprofile/g' customerprofile.sql
+sed -i 's/user_kyc_details/fnouser_user_kyc_details/g' user_kyc_details.sql
+sed -i 's/user_ucc/fnouser_user_ucc/g' user_ucc.sql
+sed -i 's/kyc_user_log_in_bk_new/fnouser_kyc_user_log_in_bk_new/g' kyc_user_log_in_bk_new.sql
+sed -i 's/second_factor_auth/fnouser_second_factor_auth/g' second_factor_auth.sql
+
+## Import ##
+fnocrm_import() {
+mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm < orders.sql
+mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm < orders_demo.sql
+mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm < pay_in_pay_out.sql
+mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm < order_charges_detail.sql
+mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm < customer.sql
+mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm < customerprofile.sql
+mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm < user_kyc_details.sql
+mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm < user_ucc.sql
+mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm < kyc_user_log_in_bk_new.sql
+mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm < second_factor_auth.sql
+}
+fnocrm_import
+sleep 15
+fnocrm_NULL() {
+mysql -h $HOST2 -u $USER2 -p$PASS2<<NULL_QUERY
+use fnocrm;
+SET SQL_SAFE_UPDATES = 0;
+update fnouser_customer set password = NULL, password = NOT NULL;
+NULL_QUERY
+}
+fnocrm_NULL
+
+if [ $? -eq 0 ]
+then
+        curl -X POST -H 'Content-type: application/json' --data '{"text":"Prod to fnorcm data import was successfull !!!"}' $SLACK_URL_PROD
+else
+        curl -X POST -H 'Content-type: application/json' --data '{"text":"Prod to fnorcm data import failed !!!"}' $SLACK_URL_PROD
+fi
+sleep 10
+## Tables count Post Import##
+POST_COUNT () {
+mysql  -h $HOST2 -u $USER2 -p$PASS2 fnocrm -N -e "SELECT table_name FROM INFORMATION_SCHEMA.tables where table_schema='fnocrm';" | while read -r table_name  
+do  
+	count=$(mysql -h $HOST2 -u $USER2 -p$PASS2 fnocrm -N -e "SELECT COUNT(*) FROM $table_name;")  
+	POST_COUNT=$(echo "DW CRM Tables count after import:" $table_name $count)
+	#echo  "Table count before import: $table_name $count;"
+	echo "$POST_COUNT"
+	curl -X POST --silent --data \ "payload={\"text\": \"$POST_COUNT\"}" $SLACK_URL_PROD;
+done
+}
+POST_COUNT
+## Backup retention ##
+#backup_retention() {
+#DAYS=30
+#tar -cf $NOW.tar $NOW
+#$GZIP -9 $NOW.tar
+#find $DEST -mtime +$DAYS -exec rm -f {} \;
+#}
+#backup_retention
+#if [ $? -eq 0 ]
+#then
+#        curl -X POST -H 'Content-type: application/json' --data '{"text":"Backup archive of mySQL Dump was successfull !!!"}' $SLACK_URL_PROD
+#else
+#        curl -X POST -H 'Content-type: application/json' --data '{"text":"Backup archive of MySQL Dump failed !!!"}' $SLACK_URL_PROD
+#fi
+curl -X POST -H 'Content-type: application/json' --data {\"text\":\"Starting CRM DATA Refresh COMPLETED for" \"$NOW\"
+#SCRIPT_PATH="/home/ubuntu/scripts/mongo-import.sh"
+#bash $SCRIPT_PATH
+exit 0
