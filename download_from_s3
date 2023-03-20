@@ -3,6 +3,9 @@
 # Read file names from input file
 file_names=($(cat file_names.txt))
 
+# Bucket name
+bucket_names=rahul373839
+
 # Read folder names from input file
 IFS=$'\n' read -d '' -r -a folder_names < folder_names.txt
 
@@ -13,10 +16,10 @@ for file_name in "${file_names[@]}"; do
   for folder_name in "${folder_names[@]}"; do
 
     # Check if file exists in folder
-    if aws s3 ls "s3://rahul373839/$folder_name/$file_name.zip" &> /dev/null; then
+    if aws s3 ls "s3://$bucket_names/$folder_name/$file_name.zip" &> /dev/null; then
 
       # Download file from S3 bucket
-      aws s3 cp "s3://rahul373839/$folder_name/$file_name.zip" .
+      aws s3 cp "s3://$bucket_names/$folder_name/$file_name.zip" .
       break  # break the loop if file is found in folder
 
     fi
