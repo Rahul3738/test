@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# Read file names from input file
+file_names=($(cat file_names.txt))
+
+# Read folder names from input file
+IFS=$'\n' read -d '' -r -a folder_names < folder_names.txt
+
+# Loop through each file name
+for file_name in "${file_names[@]}"; do
+
+  # Loop through each folder name
+  for folder_name in "${folder_names[@]}"; do
+
+    # Check if file exists in folder
+    if aws s3 ls "s3://rahul373839/$folder_name/$file_name.zip" &> /dev/null; then
+
+      # Download file from S3 bucket
+      aws s3 cp "s3://rahul373839/$folder_name/$file_name.zip" .
+      break  # break the loop if file is found in folder
+
+    fi
+
+  done
+
+done
+
+# To run this script, save it as a file (let's say download_from_s3.sh) and
+# make sure that the file_names.txt and folder_names.txt files are in the same directory as the script file. 
