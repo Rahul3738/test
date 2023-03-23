@@ -9,10 +9,14 @@ bucket_names=rahul373839
 # Read folder names from input file
 IFS=$'\n' read -d '' -r -a folder_names < folder_names.txt
 
+# Initialize list to store names of files not found
+not_found_files=()
+
 # Loop through each file name
 for file_name in "${file_names[@]}"; do
 
   # Loop through each folder name
+  file_found=false
   for folder_name in "${folder_names[@]}"; do
 
     # Check if file exists in folder
@@ -20,13 +24,28 @@ for file_name in "${file_names[@]}"; do
 
       # Download file from S3 bucket
       aws s3 cp "s3://$bucket_names/$folder_name/$file_name.zip" .
+      file_found=true
       break  # break the loop if file is found in folder
 
     fi
 
   done
 
+  # If file is not found in any folder, add it to not_found_files list
+  if [ $file_found == false ]; then
+    not_found_files+=($file_name)
+  fi
+
 done
+
+# Write the list of files not found to file_not_found.txt
+if [ ${#not_found_files[@]} -gt 0 ]; then
+  printf '%s\n' "${not_found_files[@]}" > file_not_found.txt
+fi
+
+# Print the list of files not found
+echo "Files not found: ${not_found_files[@]}"
+
 
 # To run this script, save it as a file (let's say download_from_s3.sh) and
 # make sure that the file_names.txt and folder_names.txt files are in the same directory as the script file. 
